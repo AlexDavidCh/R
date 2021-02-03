@@ -1,0 +1,1126 @@
+---
+title: "Taller10"
+author: "Grupo 9"
+date: "5/8/2020"
+output: 
+  rmdformats::readthedown:
+    #code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+# Pautas del Taller
+
+Realizar un aplicación a una base de datos que contenga una variable target binaria de la cual se desea tener una regla que permita la clasificación de obeservaciones en una de las dos categorías de la variable target.
+
+## Descripción del problema
+
+Uno de los problemas que atraviesan las aerolíneas es saber si sus clientes volverán a utilizar o no su servicio para su siguiente vuelo.Dado esto, para las aerolineas es relevante saber si sus clientes han estado satisfechos o no con el servicio porque la empresa tendrá mayores ventajas, debido a que el cliente querrá tomar esta misma aerolínea para su siguiente viaje y aun así, si los precios de los vuelos suben, el cliente al sentirse cómodo con su servicio estará dispuesto a pagarlo. También, el cliente se convierte en un aliado a la empresa, porque al sentirse satisfecho con el servicio, este será un buen vocero, por ende, recomendará los servicios que presta la organización a otras personas. Por el contrario, si saben que no están satisfechos podrán tomar decisiones para mejorar su servicio para obtener clientes fieles.
+
+
+A continuación se desea encontrar los factores que están correlacionados con un pasajero satisfecho, y poder predecir la satisfacción del pasajero.
+
+
+## Descripción de los controles
+
+Las siguientes variables pueden influir positivamente a la decisión de un cliente en sentirse satisfecho al utilizar los servicios ofertados por la aerolinea.
+
+  * Wifi
+  * Tipo de Cliente
+  * Servicio de limpieza
+  * Servicio de alimentación
+  * Tipo de viaje
+  * NS_IE: Nivel de satisfaccion de entretenimiento
+  * NS_SC: Nivel de satisfacción en el asiento del avión
+  * Clase de vuelo
+  
+Las siguientes variables pueden influir negativamente a la decisión de un cliente en sentirse satisfecho al utilizar los servicios ofertados por la aerolinea.
+  
+  * Tiempo de demora de abordo 
+  * Tiempo de demora de llegada
+
+## Descipción de hipótesis sobre la problemática
+
+Las variables relacionadas con los servicios otorgados durante el vuelo como: limpieza, alimentación y entretenimeinto, influyen positivamente en la nivel de satisfaciión de los clientes con la aerolinea.
+
+las varaibles relacionadas con la demora en el abordo y llegada influyen negativamente en el nivel de satisfacción de los clientes con la aerolinea.
+
+El método de randomForest es el mejor método para predecir correctamente a los clientes satisfechos y no satisfechos.
+
+
+## Fuentes de información involucradas
+
+ + La Base de datos se obtuvo de la plataforma [Kaggle](https://www.kaggle.com/teejmahal20/airline-passenger-satisfaction), actualizada el 20 de febrero del 2020, que corresponde al conjunto de datosde una una encuesta de satisfacción de los pasajeros de una aerolínea.
+  + Librería [naniar](https://www.rdocumentation.org/packages/naniar/versions/0.0.4.9000):Esta librería proporciona estructuras de datos y funciones que facilitan el trazado de valores perdidos y el examen de imputaciones. Esto permite explorar las dependencias de datos faltantes con una desviación mínima de los patrones de trabajo comunes de 'ggplot2' y datos ordenados.
+  + Librería [cluster](https://rpubs.com/kfhidalgoh/300948):Esta librería contiene métodos para le análisis de clusters.
+  + Librería [plotly](https://plotly.com/r/): Esta librería crea gráficos interactivos con calidad de publicación.
+  + Librería [rpart](https://cran.r-project.org/web/packages/rpart/rpart.pdf): Esta librería permite realizar la partición recursiva para clasificación, árboles de regresión y supervivencia.
+  + Librería [randomForest](https://cran.r-project.org/web/packages/randomForest/randomForest.pdf): Esta librería permite la Clasificación y regresión basada en un bosque de árboles usando entradas aleatorias, basado en Breiman (2001)
+  + Librería [caret](https://cran.r-project.org/web/packages/caret/caret.pdf): Esta librería contiene funciones varias para entrenar y trazar la clasificación y Modelos de regresión.
+  + Librería [gbm](https://cran.r-project.org/web/packages/gbm/gbm.pdf): Esta librería contiene una implementación de extensiones para AdaBoost de Freund y Schapire algoritmo y la máquina de aumento de gradiente de Friedman. Incluye regresión métodos para mínimos cuadrados, pérdida absoluta, pérdida de distribución t, cuantil regresión, logística, logística multinomial, riesgos proporcionales de Poisson, Cox probabilidad parcial, pérdida exponencial AdaBoost, pérdida de bisagra Huberized y Aprender a clasificar medidas.
+  
+
+## Hipótesis vs Variables crudas y derivadas
+
+Las variables cuantitativas pueden aportar mayor información si se las trabaja en forma categórica, transformandolas en intervalos.
+
+# Análisis estadístico descriptivo
+
+## DATASET
+
+Este conjunto de datos contiene una encuesta de satisfacción de pasajeros de la aerolínea. 
+
+Inicialmente contamos con una base formada por $103904$ observaciones y $25$
+variables. 
+```{r}
+#install.packages("readr")
+library(readr)
+
+Datos <- read_csv("train.csv")
+
+```
+
+
+Debido la alta complejidad computacional que implica el trabajar con todas las observaciones, se procede a tomar el $5\%$ de observaciones y la consideración de $23$ variables. Así, para este taller se considera un subset de datos que consta de $5196$ Observaciónes y $23$ Variables. 
+
+
+```{r}
+library(rsample)
+set.seed(222)
+subdata<- initial_split(Datos, prop = 0.05, strata = "satisfaction")
+Datos1<- training(subdata) 
+
+str(Datos1)
+```
+
+```{r include=FALSE}
+library(dplyr)
+
+Datos1<-select(Datos1, -X1,-id)
+```
+
+
+## Discretización de variables
+
+Para una mejor manipulación e interpretación de las variabbles, procedemos a transformar los datos a __númerico__ y a __factor__ según corresponda.
+
+```{r}
+Base<-Datos1 %>% mutate( Geder=factor(Gender, level=c("Male","Female"), 
+                                     labels = c("M","F")),
+                       Customer_Type=as.factor( `Customer Type`),
+                       T_viaje=as.factor(`Type of Travel`),
+                       Edad=as.numeric(Age),
+                       Clase_vuelo=as.factor(Class),
+                       Distance_flight=as.numeric(`Flight Distance`),
+                       Wifi=as.factor(`Inflight wifi service`),
+                       NS_H_S_L=as.factor(`Departure/Arrival time convenient`),
+                       NS_RL=as.factor(`Ease of Online booking`),
+                       NS_UP=as.factor(`Gate location`),
+                       NS_CB=as.factor(`Food and drink`),
+                       NS_SC=as.factor(`Seat comfort`),
+                       NS_IE=as.factor(`Inflight entertainment`),
+                       NS_SA=as.factor(`Inflight service`),
+                       NS_Manejo_Equipaje=factor(`Baggage handling`),
+                       NS_Limpieza=factor(Cleanliness),
+                       Minut_retraso_salida=as.numeric(`Departure Delay in Minutes`),
+                       Minut_retraso_llegada=as.numeric(`Arrival Delay in Minutes`),
+                       satisfaction=factor(satisfaction, levels = c("satisfied","neutral or dissatisfied"),labels = c("Satisfecho","No satisfecho"))
+                       
+)
+
+Base<-select(Base, Gender,Customer_Type,T_viaje,Edad,Clase_vuelo,Distance_flight,Wifi,
+             NS_H_S_L,NS_RL,NS_UP,NS_CB,NS_SC,NS_IE,NS_SA,NS_Manejo_Equipaje,NS_Limpieza,Minut_retraso_salida, Minut_retraso_llegada,satisfaction)
+
+Base$satisfaction<-relevel(Base$satisfaction,ref = "Satisfecho")
+knitr::kable(head(Base))
+```
+
+*Análisis de Datos Faltantes*
+
+```{r include=FALSE}
+library(naniar)
+```
+
+Se presenta el número de datos faltantes (n_miss) por variable y su porcentaje (pct_miss).
+
+```{r}
+miss_var_summary(Base)
+```
+
+Puesto que el porcentaje de valores faltantes es inferior al 5% de los datos, los podemos eliminar por filas, de esta forma:
+
+
+```{r}
+Base<-Base[!is.na(Base$Minut_retraso_llegada),]
+Base
+```
+
+Dado esto, la base con la que trabajaremos cuanta con $5172$ observaciones y $19$ variables.
+
+
+## Descripción de la Variable Objetivo 
+
+La variable objetivo para nuestro caso de estudio es la variable **satisfactioin** que posee dos niveles: **SATISFECHO** y **NO SATISFECHO**.
+
+
+```{r}
+T1<-table(Base$satisfaction) 
+T1
+prop.table(T1)
+
+```
+
+Se observa que el porcentaje de pasajeros que se sienten satisfechos corresponde al 43,42% y no satisfechos al 56,57% con la aereolinea.
+
+## Análisis de datos atípicos
+
+A pesar que en los métodos de clasificación que vamos a utilizar( __Arbol de clasificación__ , __random forest__ , __boosting__), la presencia de datos atípicos así como datos faltantes no tienen influencia alguna, vamos a realizar un tratamiento de datos atípicos.
+
+Una opción my popular para determinar la cercanía entre cada individuo es la distancia euclideana. Sin embargo, la distancia euclidiana solo es válida para variables continuas y, por lo tanto, tenemos que usar una métrica de distancia que pueda manejar tipos de datos mixtos. En este caso, utilizaremos distancia de Gower.
+
+### Matriz de distancia Gower
+
+El concepto de distancia de Gower es en realidad bastante simple. Para cada tipo de variable, se usa una métrica de distancia particular que funciona bien para ese tipo y se escala para caer entre 0 y 1. Luego, se calcula una combinación lineal que usa pesos especificados por el usuario (más simplemente un promedio) para crear la matriz de distancia final .
+
+```{r include=FALSE}
+library(cluster)
+```
+
+*Algoritmo:*
+
+**Division de la data en tipo de variables**
+```{r}
+Base=Base %>% mutate_if(is.character, as.factor)
+gower_dist <- daisy(Base,
+                    metric = "gower",
+                    type = list(logratio = 4,logratio = 6,logratio = 17, logratio = 18 ))
+gower_mat <- as.matrix(gower_dist)
+gower<-colMeans(gower_mat)
+
+```
+
+Tomar en cuenta que debido al sesgo positivo en algunas de las variables, la transformación de registro se realiza internamente a través del argumento **type**.
+
+**Descripción del score Gower**
+
+```{r}
+library(plotly)
+plot_ly( x=~gower, type="histogram")
+summary(gower)
+```
+
+
+* Notemos que:
+ + En el histograma podemos decir que los valores mayores a 0.63 son datos atípicos.
+ + En el resumen estadístico de los datos podemos ver que la media es aproximadamente de 0.55 y el máximo es de aproximadamente 0.69, lo que nos indica que verdaderamente existen datos atípicos.
+
+
+**Limite para declarar atípicos**
+
+Tomaremos al percentil 99, Para determinar una cota **"lim"** que nos indique a partir de que dato se considera como atípico.
+
+```{r}
+
+lim<-quantile(gower,c(0.75,0.99))[2]
+lim
+indexout<-which(gower>lim)
+indexout
+length(indexout)
+
+```
+
+$lim=2.10$ nos indica que los valores superiores serán  datos anómalos. Así, obtenemos 52 observaciones declaradas como atípicos.
+
+**Eliminación de atípicos**
+
+```{r}
+Base<-Base[-indexout,]
+Base
+
+```
+
+Nos quedamos con una data de 5125 filas y 19 variables.
+
+# Análisis descriptivo Cuantitativas{.tabset .tabset-fade .tabset-pills}
+
+## VARIABLES CUANTITATIVAS
+
+Contamos con las siguientes variables cuantitativas
+
+```{r}
+Base %>% filter(satisfaction=="Satisfecho") %>% 
+  select_if(is.numeric) %>% 
+  names()
+
+```
+
+Un total de 4 variables cuantitativas.
+
+**CORRELACIÓN**
+
+La correlación de variables podría ser influyente en la aplicación de los métodos de clasificación. 
+
+```{r}
+#Correlación entre variables cuantitativas
+library(corrplot)
+
+A<-Base %>% filter(satisfaction=="Satisfecho") %>% select_if(is.numeric)
+corrplot(cor(A))
+```
+
+En general existe una correlación baja entre las variables con un caso particular en la correlación de la variable __"Minut_retraso_llegada"__ y __Minut_retraso_salida"__, como era de esperarse estas dos variables estan altamente correlacionas positivamente pués si un vuelo se retrasa en su salida obviamente se va  retrasar su llegada. 
+
+
+## Boxplot
+
+**BOXPLOT**
+
+```{r}
+library(plotly)
+Bp<-plot_ly(type = 'box')
+Bp<-Bp %>% add_boxplot(y=Base$Edad,name="Edad",boxpoints=TRUE  )
+Bp<-Bp %>% add_boxplot(y=Base$Minut_retraso_salida,name="MIN. RETRASO salida",boxpoints=TRUE  )
+Bp<-Bp %>%  add_boxplot(y=Base$Distance_flight, name="Distancia de vuelo",boxpoints=TRUE)
+Bp<-Bp %>%  add_boxplot(y=Base$Minut_retraso_llegada, name="MIN. RETRASO llegada",boxpoints=TRUE)
+Bp<-Bp %>% layout("Box plot Univariantes")
+Bp
+```
+
+## Distribución de variables
+
+**HISTOGRAMAS**
+
+```{r}
+library(ggplot2)
+
+ggplot(data=Base, aes(x=Edad, fill=satisfaction))+ geom_histogram()+ labs(y="N.eventos", title = "Edad")
+
+ggplot(data=Base, aes(x=Distance_flight,fill=satisfaction))+ geom_histogram()+ labs(y="N.eventos", title ="Distancia del Vuelo")
+
+ggplot(data=Base, aes(x=Minut_retraso_salida,fill=satisfaction))+ geom_histogram()+ labs(y="N.eventos", title ="Minutos de Retraso de salida")
+
+ggplot(data=Base, aes(x=Minut_retraso_salida,fill=satisfaction))+ geom_histogram()+ labs(y="N.eventos", title ="Minutos de Retraso de salida")
+
+ggplot(data=Base, aes(x=Minut_retraso_llegada,fill=satisfaction))+ geom_histogram()+ labs(y="N.eventos", title ="Minutos de Retraso de llegada")
+```
+
+
+
+# Análisis  descriptivo Cualitativas {.tabset .tabset-fade .tabset-pills}
+
+Las variables cualitativas son:
+
+```{r}
+Base %>% filter(satisfaction=="Satisfecho") %>% 
+  select_if(is.factor) %>% 
+  names()
+```
+
+
+## Customer_type
+
+**Descripción**
+
+La varaible tipo de cliente contiene la a los clientes leales y no leales, que hacen referencia a quellos que han tomado varios vuelos en esta aerolinea, es decir que la prefieren al resto de las ofertadas en el mercado. 
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$Customer_Type,Base$satisfaction)
+```
+
+COmo el p-valor es casi cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=Customer_Type, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Tipo de cliente")
+```
+
+En este gráfico se puede observar que los clientes no leales, no se han sentido satisfechos con los servicios ofertados por la aerolinea, por lo que no prefieren y deciden utilizar otras aerolineas del mercado. Por otro lado, se puede observar que el pequeño número de personas no leales que no se han sentido satisfechos en en la aerolinea, puede deberese a que no realizan muchos viajes en avión. También, el mayor porcentaje de personas leales no se sienten satisfechos con los servicios ofertados, sin embargo, pueden seguir eligiendo esta aerolinea, porque los precios son menores a los ofertados en el mercado.
+
+
+## T_viaje
+
+**Descripción**
+```{r}
+summary(Base$T_viaje)
+```
+
+La variable Tipo de Viaje contiene dos clases de viajes, ya sea personal o de trabajo, en la que se observa que la mayoria de los clientes (3484) de la aerolinea viajan por motivos de trabajo.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$T_viaje,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=T_viaje, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Tipo de viaje")
+```
+
+En este gráfico se observa que la mayor parte los clientes que realizan un viaje personal, que puede deberse a viajes de turismo, no se sienten satisfechos con los servicios ofertados en la aerolinea. Por el contrario, se observa que un mayor porcentaje de los clientes que realizan un viaje de negocios si se sienten satisfechos por los servicios ofertados, y esto puede deberse a que no buscan comodidad en el viaje si no más bien, precios y eficicia en los servicios.
+
+## Clase_vuelo
+
+**Descripción**
+
+```{r}
+summary(Base$Clase_vuelo)
+```
+
+La variable clase de vuelo contiene tres categorías: Negocios, Económico y Preferencial, en la cual se observa que la matoría de los clientes de la aerolinea utilizan los vuelos de engocio y un mínimo número de clientes utilizan la clase preferencial, que por lo general se lo utiliza para viajes de turismo.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$Clase_vuelo,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=Clase_vuelo, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Clase de vuelo")
+```
+
+En el gráfico se observa que existe un mayor porcentaje de clientes que ha utilizado el tipo de viaje **Económico** se han sentido satisfechos con los servicios ofertados por la aerolinea, al igual que las personas que han utilizado la clase **Preferencial**. Sin embargo, en la clase **Negocios** la mayor parte de personas no se han sentido satisfechos por los servicios.
+
+## Wifi
+
+**Descripción**
+
+```{r}
+summary(Base$Wifi)
+```
+
+La variable Wifi representa que tan a gusto se han sentido los clientes con el sevicio de wifi ofertado por la compañía en el viaje realizado, de una escala de muy malo (0) a excelente (5). Además, se pued eobservar que la mayría de personas califican a este servicio como bueno; es decir, que les permite realizar todas las actividades pero su velicidad no es la mejor.
+
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$Wifi,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=Wifi, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Servicio Wifi")
+```
+
+En este gráfico se obseva que la mayor parte de clientes no satisfechos con los servicios de la aerolinea consideran que el servicio de wifi va de regular a bueno. Por el contrario solo un mínimo porcentaje de lientes no satisfechos consideran que este sevicio es excelente.
+
+## NS_H_S_L
+
+**Descripción**
+
+```{r}
+summary(Base$NS_H_S_L)
+```
+
+La variable Tiempo y llegada conveniente, pregunta al cliente si le ha parecido adecuado el tiempo de vuelo a su destino en una escala de muy malo(0) a excelente (5), y se observa que la mayor parte de los clientes consideran que los tiempos de salida y llegasa don muy buenos y excelentes.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_H_S_L,Base$satisfaction)
+```
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_H_S_L, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Tiempo y llegada conveniente")
+```
+
+En el gráfico se observa que el mayor porcentaje de clientes no satisfechos, consieran que los tiempos de salida y de llegada no son buenos y que se deberían de ajustar mejor a los horarios establecidos.
+
+## NS_RL
+
+**Descripción**
+
+```{r}
+summary(Base$NS_RL)
+```
+
+La variable Facilidad de reserva online, pregunta al cliente que tan fácil es realizar una reserva de vuelos por internet en una escala de muy mala (0) a excelente (5), en donde se observa que la mayor parte de clientes considera que es buena y regular.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_RL,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_RL, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Facilidad de reserva online")
+```
+
+En el gráfico se observa que la mayor parte de los clientes no statisfechos consideran que la facilidad de la reserva de vuelos en linea en buena y regular.
+
+## NS_UP
+
+**Descripción**
+
+```{r}
+summary(Base$NS_UP)
+```
+
+La variable ubicación de la puerta contiene 5 categorías que represetan la opinión del cliente en cuanto la ubicación de la puerta, en donde muy mala es calificada por el 1 y excelente por el número 5.
+Además, se puede observar que la mayoría de los cleintes consideran que la ubicación de la puerta es buena y muy buena 
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_UP,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_UP, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Ubicación de la puerta")
+```
+
+En el gráfico se observa que la mayor parte de clientes no satisfechos consideran que la ubicación de la puerta es buena y muy buena.
+
+## NS_CB 
+
+**Descripción**
+
+```{r}
+summary(Base$NS_CB)
+```
+
+La variable Comida y Bebida, representa que tan a gusto el cliente se sintió con el servicio de alimentación ofertado por la aerolínea en una escala de muy malo(0) a excelente (5). En esta se puede observar que la mayor parte de clientes considera que la comida es buena, muy buen y excelente.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_CB,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_CB, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Comida y Bebida ")
+```
+
+En el gráfico se puede observar que existe una mayor proporción de clientes satisfechos que consideran que el servicio de alimentación ofertado en la aerolinea es muy bueno y excelente.
+
+## NS_SC
+
+**Descripción**
+
+```{r}
+summary(Base$NS_SC)
+```
+
+La variable Comodidad del asiento representa en una escala de muy malo (1) a excelente (5) que tan cómodo consideran los asientos de los aviones de esta aerolinea. Dado esto, se puede observar que la mayor parte de los cleintes consideranq ue los asientos de los aviones son muy bueno y excelentes.
+
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_SC,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_SC, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Comodidad del asiento")
+```
+
+En el gráfico se puede observar que la la mayor parte los clientes satisfechos con los servicios de la aerolinea consideran que los asientos de los aviones son muy buenos y excelentes en términos de comodidad.
+
+## NS_IE
+
+**Descripción**
+```{r}
+summary(Base$NS_IE)
+```
+
+La variable Entretenimiento representa que tan bien consideran los clientes el entretenimiento que oferta la aerolinea durante el vuelo en una escala de muy malo(0) a excelente (5). En esta se puede observar que la mayor parte de los clientes considera que el entretenimeinto es muy bueno y excelente.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_IE,Base$satisfaction)
+```
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_IE, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Entretenimiento")
+```
+
+En el gráfico se puede observar que la mayor parte de clientes satisfechos con los servicios de la aerolinea considera que el entretenimiento ofertado en el vuelo es muy bueno y excelente.
+
+## NS_SA
+
+**Descripción**
+
+```{r}
+summary(Base$NS_SA)
+```
+
+la variable Servicio hace referencia a qué tan a gusto se han sentido los clientes con el servicio en el momento de abordar el viaje, en una escala de muy malo(0) a excelente (5). En esta variable se observa que la mayor parte de los clientes considera que este servicio es muy bueno y excelente.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_SA,Base$satisfaction)
+```
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_SA, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Servicio")
+```
+
+En el gráfico se observa que la mayor parte de clientes no satisfechos consideran que este servicio de abordo es bueno y muy bueno, porque pueden existir otras variables que cambiaron su opinión sobre el servicio general de la aerolinea.
+
+## NS_Manejo_Equipaje"
+
+**Descripción**
+
+```{r}
+summary(Base$NS_Manejo_Equipaje)
+```
+
+La variable Manejo de equipaje hace referencia a qué tan bien sintieron el servicio dado a su equipaje, en una escala de muy malo(0) a excelente(5). Se observa que la mayor parte de clientes considera que el manejo dado a su equipaje es muy bueno y excelente.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_Manejo_Equipaje,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_Manejo_Equipaje, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Tratamiento de Equipaje ")
+```
+
+En el gráfico se puede observar que aunque una gran cantidad de clientes se sintieron bien con el tratamiento de equipaje aun así esto no fue suficiente para sentirse satisfechos con la aerolinea.
+
+## NS_Limpieza
+
+**Descripción**
+
+```{r}
+summary(Base$NS_Limpieza)
+```
+
+La variable Servicio de Limpieza pregunta al cliente que tan bien se sintió con el servicio de limpieza que otroga la aerolinea durante el vuelo, en una escala de muy malo (0) a excelente (5). En esta se puede observar que la mayor parte de los pasajeros consideran que el servicio de limpieza en bueno, muy bueno y excelente.
+
+**Test de Independencia**
+
+```{r}
+chisq.test(Base$NS_Limpieza,Base$satisfaction)
+```
+
+El p-valor es cercano a cero, entonces se rechaza la Hipótesis de independencia, es decir las variables son Dependientes.
+
+
+**Barplot**
+
+```{r}
+ggplot(data=Base, aes(x=NS_Limpieza, fill=satisfaction))+ geom_bar()+
+  labs(y="N.eventos", title = "Nivel de satisfación De Limpieza  ")
+```
+
+En el gráfico se puede ver que la mayor parte de clientes no satisfechos con la aerolinea consideran que el servicio de limpieza en muy malo y malo.
+
+
+# Métodos de clasificación.{.tabset .tabset-fade .tabset-pills}
+
+## Árbol de clasificación
+
+Los árboles de clasificación requieren muy poca preparación de datos. Particularmente, no requieren escalamiento de atributos o centrado.
+
+### Árbol de Clasificación con rpart
+
+La librería **rpart**
+
+#### Paso 1 : División de la data
+
+Antes de entrenar el modelo vamos a dividir el conjunto de datos en entrenamiento y test. Para eso utilizaremos la funcion **initial_split()** de la libreria **rsample**, la cuál nos da las datas de entrenamiento y test con el mismo porcentaje de "SATISFECHO" Y "NO SATISFECHO", tomaremos un $70\%$ de datos para entrenamiento y el $30\%$ para test.
+
+```{r include=FALSE}
+### Division de la data
+library(rsample)
+```
+
+```{r}
+set.seed(123)
+Cort<- initial_split(Base, prop = 0.7, strata = "satisfaction")
+train<- training(Cort) 
+test<- testing(Cort)
+```
+
+De esta manera tenemos que nuestro conjunto de datos, el 3585 datos son utilizados para el entrenamiento y el resto, 1535 datos, se destinan para la prueba.
+
+#### Paso 2: Aplicación del modelo
+
+El comando para generar un modelo de árbol de decisión, usando la librería **rpart** lleva el mismo nombre. Por defecto, **rpart()** usa la medida de Gini para la división de los nodos.
+Además, para incluir restricciones definidas por el usuario respecto a cómo elaborar el árbol de decisión se puede utilizar el comando **rpart.control()** de la librería **rpart**.
+* Arguments **rpart.control()**:
+  + minsplit: establece el número mínimo de observaciones en el nodo antes de que el algoritmo realice una división.
+  + minbucket:  establece el número mínimo de observaciones en el nodo final, es decir, la hoja.
+  + maxdepth: establece la profundidad máxima de cualquier nodo del árbol final. El nodo raíz se trata con una profundidad de 0.
+  
+```{r include=FALSE}
+library(rpart)
+```
+
+```{r}
+control <- rpart.control( minbucket = 0.05, cp = 0.01)
+arbolito<-rpart(satisfaction~.,method = "class", data=train, control = control )
+arbolito
+```
+
+
+#### Paso 3: Visualización de Resultados
+
+```{r}
+library(rpart.plot)
+```
+
+```{r}
+rpart.plot(arbolito)
+#printcp(arbolito)  
+```
+
+* Cada nodo muestra
+  + La clase predecida ,
+  + La probabilidad predecida ,
+  + El porcentaje de observaciones en el nodo.
+
+Inicialmente el 100% de los datos de entrenamiento (o prueba) se ubican en el nodo raíz, los cuales se dividen de acuerdo a la Clase de Vuelo  ya sea está Business o Eco, es así que con este criterio el 49% de los datos  (los individuos en clase Business) pasan al segundo nodo y el 51% (los individuos de clase Eco) estarán en el nodo 3. El razonamiento es el mismo para cada uno de los nodos y criterios de división, y finalmente el proceso termina cuando habremos llegado a nodos hojas, es decir se clasifique los datos de acuerdo con los niveles Satisfecho o No satisfecho.
+
+#### PASO 4: Validación
+
+##### Matriz de Confusión
+
+El modelo ha sido entrenado y ahora puede ser usado para predecir nuevas instancias en el conjunto de datos de test. Para esto se usa la función predict().
+
+**Matriz de confución con los datos de entrenamiento**
+
+```{r}
+library(caret)
+```
+
+```{r}
+prediccion<-predict(arbolito,newdata = train, type = "class")
+### Matriz de confusion
+confusionMatrix(prediccion,train$satisfaction)
+```
+
+* Tenemos:
+  + Presición : 0.9244
+  + Sensibilidad : 0.9145        
+  + Especificidad : 0.9320
+  
+El porcentaje de observaciones catalogadas como clientes satisfechos por la aerolinea fueron predichas correctamente en un 91,45%. Mientras que, la tasa negativa verdadera; es decir que la proporción de las observaciones catalogadas como clientes no satisfechos se identificaron correctamente en un 93,20%.
+
+Sin embargo, en principio se puede sospechar de un sobreajuste debido a la alta Precisión obtenido en el modelo y una sensibilidad semejante.
+
+**Matriz de confución con los datos de test**
+
+```{r}
+prediccion2<-predict(arbolito, newdata = test, type="class")
+### Matriz de confusion
+
+M<-confusionMatrix(prediccion2,test$satisfaction)
+M
+```
+
+* Tenemos:
+  + Presición : 0.9199
+  + Sensibilidad : 0.9054         
+  + Especificidad : 0.9310
+
+Con los datos de prueba se obtuvo que el porcentaje de observaciones catalogadas como clientes satisfechos por la aerolinea fueron predichas correctamente en un 90,54%. Mientras que, la tasa negativa verdadera; es decir que la proporción de las observaciones catalogadas como clientes no satisfechos se identificaron correctamente en un 93,10%.
+
+##### Curva ROC
+
+```{r}
+library(pROC)
+```
+
+```{r}
+### Curva RoC
+A<-as.numeric(test$satisfaction)
+B<-as.numeric(prediccion2)
+C<-plot.roc(A,B,main="Confidence interval of a threshold", percent=TRUE,
+         ci=TRUE, of="thresholds",
+         thresholds="best", 
+         print.thres="best")
+C
+```
+
+La curva ROC nos permite visualizar el equilibrio entre la tasa a la que el modelo puede reconocer con precisión los casos positivos frente a la tasa a la que identifica erróneamente los casos negativos como positivos para diferentes partes del conjunto de pruebas. En el modelo aplicado se obtuvo una área de 91.82%, por lo que, se podría decir que el modelo arroja resultados robustos y es confiable para predecir el nivel de satisfacción de nuevos clientes.
+
+## Randon forest
+
+### Mtry
+
+Para el valor de $m$ tradicionalmente se toma $(p)^{1/2}$ donde $p$ es el número de variables explicativas.
+
+La librería **randomForest** tiene una función que nos ayuda a obtener un valor Óptimo de $m$.
+
+```{r include=FALSE}
+library(randomForest)
+```
+
+```{r}
+# Random Forest
+
+train=train %>% mutate_if(is.character, as.factor)
+
+##valor óptimo de mtry
+bestmtry<-tuneRF(train,train$satisfaction, stepFactor = 1.2, improve= 0.01, trace=T,plot=F)
+bestmtry
+```
+
+El valor óptimo de m obtenido es igual a 4
+
+
+### Modelo
+
+Aplicaremos el modelo con 100 árboles y un $m=4$.
+
+```{r}
+
+rf <- randomForest(satisfaction~., data=train,ntree = 100, mtry = 4,importance = TRUE, proximity = TRUE)
+rf
+```
+
+Mediante el método RandomForest se obtuvo en la matriz de confusión que 1422 clientes Satisfechos calificados por la aerolinea fueron predichos correctamente, en el mismo sentido, se obtuvo que 1951 clientes catalogados como no satisfechos fueron predichos correctamente como clientes no satisfechos. Dado esto, se obtuvo un 94,08% de Presición en el modelo.
+
+**ACCURACY**
+
+```{r}
+Acuaracy<-(rf$confusion[1]+rf$confusion[4])/nrow(train)
+Acuaracy
+```
+
+Tenemos un Accuracy de $0.9408$
+
+### Predicción 
+
+```{r}
+test=test %>% mutate_if(is.character, as.factor)
+pred<-predict(rf,test, type="class")
+```
+
+### Matriz de confusión para las observaciones de prueba
+
+```{r}
+confusionMatrix(test$satisfaction,pred)
+```
+
+* Tenemos:
+  + Accuracy : 0.9381
+  + Sensitivity : 0.9454          
+  + Specificity : 0.9329
+
+Con los datos de prueba se obtuvo que el porcentaje de observaciones catalogadas como clientes satisfechos por la aerolinea fueron predichas correctamente en un 94,54%. Mientras que, la tasa negativa verdadera; es decir que la proporción de las observaciones catalogadas como clientes no satisfechos se identificaron correctamente en un 93,29%.
+  
+### Error rate
+La tasa de error o tasa de clasificación errónea de un clasificador, es simplemente 1-precisión. Si tuviéramos que usar el conjunto de entrenamiento (en lugar de un conjunto de prueba) para estimar la tasa de error de un modelo, esta cantidad se conoce como error de restitución.
+
+```{r}
+# Error rate of Random Forest
+plot(rf)
+```
+
+### Número de los nodos de los árboles
+
+```{r}
+plot_ly(x=~treesize(rf), type="histogram")
+
+```
+
+### Variables más importantes
+
+```{r}
+varImpPlot (rf)
+```
+Podemos ver que las varibales más Importantes para la clasificacion de "SATISFECHO Y NO SATISFECHO", mediante la precisión y el coeficiente de Gini, son:
+
+  * Wifi
+  * Customer Type
+  * Tipo de viaje
+  * NS_IE: Nivel de satisfaccion de entretenimiento
+  * NS_SC: Nivel de satisfacción 
+  * Clase de vuelo
+
+
+## BOOSTING
+
+Boosting es otra estrategia de ensemble que se puede emplear con un amplio grupo de métodos de statistical learning, entre ellos los árboles de predicción. La idea detrás de boosting es ajustar, de forma secuencial, múltiples weak learners (modelos sencillos que predicen solo ligeramente mejor que lo esperado por azar). Cada nuevo modelo emplea información del modelo anterior para aprender de sus errores, mejorando iteración a iteración.
+
+Los algoritmos de boosting se caracterizan por tener una cantidad considerable de hiperparámetros, cuyo valor óptimo se identifica mediante validación cruzada. Tres de los más comunes son:
+
+
+*El número de weak learners o número de iteraciones: A diferencia del bagging y random forest, el boosting puede sufrir overfitting si este valor es excesivamente alto. Para evitarlo se emplea un término de regularización conocido como learning rate.
+
+*Learning rate (λ): Controla el ritmo al que aprenden los modelos. Suelen recomendarse valores de 0.01 o 0.001, aunque la elección correcta puede variar dependiendo del problema. Cuanto menor sea λ, más árboles se necesitan para alcanzar buenos resultados pero menor es el riesgo de overfitting.
+
+*Si los weak learners son árboles, el número de divisiones d de cada árbol. Suelen emplearse valores pequeños, entre 1 y 10.
+
+**ADABOOST**
+
+El algoritmo AdaBoost  supuso un avance muy importante en el campo del aprendizaje estadístico, ya que hizo posible aplicar la estrategia de boosting a multitud de problemas.
+
+La función gbm() del paquete gbm incorpora los algoritmos de AdaBoost y sus generalizaciónes como Gradient Boosting y Stochastic Gradient Boosting, empleando árboles de predicción a modo de weak learners.Esta función contiene multitud de argumentos, cuya correcta elección puede determinar en gran medida el modelo final. Algunos de los más importantes son:
+
+*Distribution: determina la función de coste (loss function).
+
+*n.trees: número de iteraciones del algoritmo de boosting.
+
+*interaction.depth: determina la complejidad de los árboles empleados como weak learner.
+
+Para más información del paquete gbm, puede consultar https://rpubs.com/Joaquin_AR/255596
+
+***Optimización de Parámetros***
+
+***Learning rate (shrinkage)***
+
+```{r include=FALSE}
+#install.packages("gbm")
+library(gbm)
+```
+
+Búsqueda de hiperparámetros con caret
+
+```{r}
+
+#library(caret)
+
+#set.seed(123)
+#validacion <- trainControl(## 10-fold CV
+                          # method = "cv",
+                          # number = 10)
+
+#tuning_grid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                           # n.trees = c(100, 200, 300, 400), 
+                           # shrinkage = c(0.1, 0.01, 0.001),
+                           # n.minobsinnode = c(1, 10, 20))
+
+#set.seed(123)
+#mejor_modelo <- train(satisfaction ~ ., data = train, 
+                     # method = "gbm", 
+                     # trControl = validacion, 
+                     # verbose = FALSE, 
+                     # tuneGrid = tuning_grid)
+
+# Se muestran los hiperparámetros del mejor modelo 
+#mejor_modelo$bestTune
+
+```
+
+De esta manera se ajusta el modelo con los hiperparámetros determinados, n.trees=400, interaction.depth=9,shrinkage=0.1, nminobsinnode=20.
+
+
+```{r}
+set.seed(123)
+arbol_boosting <- gbm(satisfaction ~ ., data = train,
+                      distribution = "multinomial",
+                      n.trees = 400,
+                      interaction.depth = 9,
+                      shrinkage = 0.1,
+                      n.minobsinnode = 20,
+                      bag.fraction = 0.5)
+```
+
+***Error de entreamiento***
+
+```{r}
+
+mean(arbol_boosting$train.error)
+```
+
+***Influencia relativa de cada predictor***
+
+```{r}
+importancia_pred <- summary(arbol_boosting, plotit = FALSE)
+ggplot(data = importancia_pred, aes(x = reorder(var, rel.inf), y = rel.inf,
+                                    fill = rel.inf)) +
+  labs(x = "variable", title = "Reducción de MSE") +
+  geom_col() +
+  coord_flip() +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+Como se puede observar, los predictores más influyentes son:
+ * Wifi
+ * Clase_vuelo
+ * NS_IE
+
+Una vez generado el modelo, se predice el precio medio empleando el test set y se evalúa su precisión.
+
+
+```{r}
+predic <- predict(arbol_boosting, newdata = test,type = "response",n.trees = 400)
+
+```
+
+El resultado predicho no son datos fáciles de leer, por lo que obtendremos nombres de clase con el valor de predicción más alto
+
+```{r}
+labels = colnames (predic) [apply (predic, 1, which.max)]
+ result = data.frame (test$satisfaction, labels )
+print(result)
+```
+
+***Matriz de confusión***
+
+```{r}
+cm=confusionMatrix(test$satisfaction,as.factor(labels))
+cm
+```
+
+
+## Validación Cruzada
+
+La Validación Cruzada o k-fold Cross Validation consiste en tomar los datos originales y crear a partir de ellos dos conjuntos separados: un primer conjunto de entrenamiento (y prueba), y un segundo conjunto de validación.
+
+Luego, el conjunto de entrenamiento se va a dividir en k subconjuntos y, al momento de realizar el entrenamiento, se va a tomar cada k subconjunto como conjunto de prueba del modelo, mientras que el resto de los datos se tomará como conjunto de entrenamiento.
+
+Este proceso se repetirá k veces, y en cada iteración se seleccionará un conjunto de prueba diferente, mientras los datos restantes se emplearán, como se mencionó, como conjunto de entrenamiento. Una vez finalizadas las iteraciones, se calcula la precisión y el error para cada uno de los modelos producidos, y para obtener la precisión y el error final se calcula el promedio de los k modelos entrenados.
+
+Una vez se cuenta con esta precisión promedio para un modelo, se puede repetir entonces el procedimiento del Cross Validation para todos los demás modelos de clasificación que se estén evaluando, y se seleccionará al final aquel que produzca el mejor valor de precisión y menor error promedio.
+
+Para aplicar la Validación Cruzada vamos a hacer uso de la función **createFolds** del paquete **caret**, y luego entrenaremos cada modelo sobre $k = 10$ subconjuntos haciendo uso de la función **lapply**:
+
+### Árbol
+
+```{r}
+#### VALIDACIÓN CRUZADA
+
+library(caret)
+
+folds<- createFolds(train$satisfaction, k = 10)
+
+# Decision Tree
+library(rpart)
+train
+cvTree <- lapply(folds, function(x){
+  training_fold <- train[-x, ]
+  test_fold <- train[x, ]
+  clasificador <- rpart(satisfaction ~ ., data = training_fold)
+  y_pred <- predict(clasificador, newdata = test_fold, type = 'class')
+  cm <- table(test_fold$satisfaction, y_pred)
+  precision <- (cm[1,1] + cm[2,2]) / (cm[1,1] + cm[2,2] +cm[1,2] + cm[2,1])
+  return(precision)
+})
+
+CV_presicio<-mean(as.numeric(cvTree))
+CV_presicio
+```
+
+Para el método de árbolde clasificación el mejor modelo obtenido tiene una precisión del 92,35%
+
+### RForest
+
+```{r}
+# Rforest
+
+Cv_RForest<- lapply(folds, function(x){
+  training_fold <- train[-x, ]
+  test_fold <- train[x, ]
+  clasificador <-  randomForest(satisfaction~., data=train,ntree = 30, mtry = 3,importance = TRUE,proximity = TRUE)
+  y_pred <- predict(clasificador, newdata = test_fold, type = 'class')
+  cm <- table(test_fold$satisfaction, y_pred)
+  precision <- (cm[1,1] + cm[2,2]) / (cm[1,1] + cm[2,2] +cm[1,2] + cm[2,1])
+  return(precision)
+})
+
+CV_Presicion<- mean(as.numeric(Cv_RForest))
+
+CV_Presicion
+```
+
+Para el método de árbolde clasificación el mejor modelo obtenido tiene una precisión del 99,91%
+
+
+# Conlusión de la hipótesis
+
+Por medio de los diferentes métodos aplicados en el análisis se logró comprobar si las hipótesis planteadas al inicio de la investigación eran verdaderas o no, y con esto ayudar a la aeroliena a mejorar sus servicios para que los clientes prefieran su aerolinea.
+
+Los diferentes métodos aplicados nos proporcionaron resultados robustos en la clasificación de los clientes, lo que permite tener una mayor confianza al predecir la clase de nuevos clientes de la aerolinea.
+
+## Datos soporte de la hipóteis.
+
+Las 5 varaibles más influyentes en la categorización de un cliente como satisfecho o insatisfecho con los servicios otrogados por la aerolinea, obtenidos por los diferentes métodos aplicados en el presente análisis son:
+
+  * Wifi
+  * Tipo de viaje
+  * NS_IE: Nivel de satisfaccion de entretenimiento
+  * NS_SC: Nivel de satisfacción en el asiento del avión
+  * Tipo de vuelo
+  
+Al comparar con las hipótesis planteadas al inicio del análisis, las cuales estan relacionadas con la comodidad que ofrece la aerolinea se puede observar que las 4 varibales mencionadas a continuación no fueron significativas en la decisión de los clientes de sentirse satisfechos con la aerolinea.
+
+  * Servicio de limpieza
+  * Servicio de alimentación
+  * Tiempo de demora de abordo 
+  * Tiempo de demora de llegada
+
+
+## Conclusiones de Negocio
+
+La aerolínea al desear tener clientes satisfechos para que quieran tomar su aerolínea, deben mejorar sus servicios como wifi, la comodidad de los asientos, los diversos tipos de entretenimiento y el tipo de vuelo que se ofrece para los viajes de negocio y personales.
+
+## Aplicación de Negocio
+
+La aerolinea debe de tomar las siguientes recomendaciones para que sus clientes se sientan satisfechos con los servicios proporcionados por la aerolinea y de esta manera conseguir que los clientes se vuelvan leales; es decir, que prefieran esta aereolía por las demás ofertadas en el mercado.
+
+La aerolinea debe mejorar sus servicios ofertados como lo es el wifi, ya que por las estadisticas obtenidas es muy importante para los pasajeros contar con un servicio rápido y que les permita realizar sus actividades en línea sin ningún problema, y la mayoria de los clientes considera que este servicio no es eficiente y les causa malestar durante el vuelo.
+
+La aerolinea debe mejorar los servicio proporcionados en la clase de vuelo personal, ya que el pagar un boleto con descuento no significa que los servicios proporcionados durante el vuelo deben de ser pésimos.
+
+La aerolinea debe de mejorar la comodidad de los asientos de los clientes, ya que ellos lo consideran fundamental para viales de larga distancia.
